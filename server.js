@@ -56,7 +56,8 @@ app.post('/api/tts', async (req, res) => {
                     stability: 0.4,
                     similarity_boost: 0.8,
                     style: 0.7,
-                    use_speaker_boost: true
+                    use_speaker_boost: true,
+                    speed: 1.2
                 }
             })
         });

@@ -456,9 +456,11 @@ function App() {
       const url = URL.createObjectURL(blob);
       const audio = new Audio(url);
       audioRef.current = audio;
-      // Set up synced typing
-      showTypingEffectSynced(data.response, audio);
-      audio.play();
+      // Wait for metadata to load before starting sync and playback
+      audio.addEventListener('loadedmetadata', () => {
+        showTypingEffectSynced(data.response, audio);
+        audio.play();
+      });
     } catch (err) {
       setMessages((msgs) => [...msgs, { sender: 'ai', text: 'Error: Could not connect to AI.' }]);
       setTyping(false);
