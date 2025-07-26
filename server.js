@@ -2,6 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
 import { Readable } from 'stream';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+dotenv.config({ path: join(__dirname, '.env') });
+
+// Debug: Check if environment variables are loaded
+console.log('Environment variables loaded:', {
+    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ? 'Found' : 'Not found'
+});
 
 const app = express();
 const PORT = 3001;
@@ -39,7 +52,14 @@ app.post('/api/chat', async (req, res) => {
 app.post('/api/tts', async (req, res) => {
     const { text } = req.body;
     if (!text) return res.status(400).json({ error: 'Text is required' });
-    const apiKey = 'sk_7089efd7054563edec532c1f4c7eca734ea23d7e9e6d0c72'; // <--- REPLACE THIS
+    let apiKey = process.env.ELEVENLABS_API_KEY;
+
+    // Fallback to hardcoded key if env var is not loaded (for testing)
+    if (!apiKey) {
+        console.error('ELEVENLABS_API_KEY not found in environment variables, using fallback');
+        apiKey = 'sk_7089efd7054563edec532c1f4c7eca734ea23d7e9e6d0c72';
+    }
+
     const voiceId = 'eVItLK1UvXctxuaRV2Oq';
     try {
         const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -63,6 +83,7 @@ app.post('/api/tts', async (req, res) => {
         });
         if (!ttsRes.ok) {
             const err = await ttsRes.text();
+            console.error('ElevenLabs API error:', ttsRes.status, err);
             return res.status(500).json({ error: 'TTS failed', details: err });
         }
         res.setHeader('Content-Type', 'audio/mpeg');

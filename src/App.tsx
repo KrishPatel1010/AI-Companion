@@ -4,8 +4,8 @@ import React, { Suspense, useState, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import type { ComponentProps } from 'react';
 
-type RobinModelProps = { expression?: string } & ComponentProps<'primitive'>;
-const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSyncPhoneme = '', object, ...props }) => {
+type RobinModelProps = { expression?: string; isWaving?: boolean } & ComponentProps<'primitive'>;
+const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSyncPhoneme = '', isWaving = false, object, ...props }) => {
   const gltf = useGLTF('/robin.glb')
   const faceMeshesRef = useRef<THREE.Mesh[]>([])
   const blinkIndexRef = useRef<number | null>(null)
@@ -60,6 +60,21 @@ const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSync
             blinkIndexRef.current = dict[blinkName];
             console.log('Blink morph target found:', blinkName, 'at index', blinkIndexRef.current);
           }
+        }
+      }
+    });
+  }, [gltf]);
+
+  useEffect(() => {
+    if (!gltf.scene) return;
+    // Log all bone names, especially for clothes, hands, and tail
+    gltf.scene.traverse((child: any) => {
+      if (child.isBone) {
+        if (/cloth|hand|tail/i.test(child.name)) {
+          console.log('[ANIM TARGET] Bone:', child.name);
+        } else {
+          // Uncomment the next line to log all bones
+          // console.log('[BONE]', child.name);
         }
       }
     });
@@ -187,6 +202,83 @@ const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSync
         }
       })
     }
+
+    // Human-like, smooth lower arm idle animation or waving
+    if (gltf.scene) {
+      gltf.scene.traverse((child: any) => {
+        if (child.isBone && (child.name === 'J_Bip_L_LowerArm' || child.name === 'J_Bip_R_LowerArm')) {
+          if (!child.userData.restRotation) {
+            child.userData.restRotation = {
+              x: child.rotation.x,
+              y: child.rotation.y,
+              z: child.rotation.z,
+            };
+          }
+          const t = state.clock.getElapsedTime();
+
+          if (isWaving && child.name === 'J_Bip_R_LowerArm') {
+            // Waving animation - right arm only
+            const waveSpeed = 3.0;
+            const waveAmplitude = 0.8;
+            const waveOffset = Math.sin(t * waveSpeed) * waveAmplitude;
+            const sideToSide = Math.sin(t * waveSpeed * 0.7) * 0.3;
+
+            child.rotation.x = child.userData.restRotation.x + waveOffset;
+            child.rotation.y = child.userData.restRotation.y + sideToSide;
+            child.rotation.z = child.userData.restRotation.z + Math.sin(t * waveSpeed * 0.5) * 0.2;
+          } else {
+            // Normal idle animation
+            const isLeft = child.name === 'J_Bip_L_LowerArm';
+            const basePhase = isLeft ? 0 : Math.PI / 2;
+            // Multi-wave, subtle, organic motion
+            const x =
+              Math.sin(t * 0.45 + basePhase) * 0.18 +
+              Math.sin(t * 0.18 + basePhase * 1.2) * 0.07;
+            const y =
+              Math.sin(t * 0.33 + basePhase * 0.7) * 0.08 +
+              Math.sin(t * 0.13 + basePhase * 1.5) * 0.03;
+            const z =
+              Math.sin(t * 0.38 + basePhase * 1.1) * 0.12 +
+              Math.sin(t * 0.21 + basePhase * 0.9) * 0.04;
+            child.rotation.x = child.userData.restRotation.x + x;
+            child.rotation.y = child.userData.restRotation.y + y;
+            child.rotation.z = child.userData.restRotation.z + z;
+          }
+        }
+      });
+    }
+
+    // Tail movement (wave motion)
+    if (gltf.scene) {
+      const tailBones = [
+        'J_Opt_C_FoxTail1_01',
+        'J_Opt_C_FoxTail2_01',
+        'J_Opt_C_FoxTail3_01',
+        'J_Opt_C_FoxTail4_01',
+        'J_Opt_C_FoxTail5_01',
+        'J_Opt_C_FoxTail5_end_01',
+        'J_Opt_C_FoxTail5_end_01_end',
+      ];
+      let tailIndex = 0;
+      gltf.scene.traverse((child: any) => {
+        if (child.isBone && tailBones.includes(child.name)) {
+          if (!child.userData.restRotation) {
+            child.userData.restRotation = {
+              x: child.rotation.x,
+              y: child.rotation.y,
+              z: child.rotation.z,
+            };
+          }
+          const t = state.clock.getElapsedTime();
+          const phase = tailIndex * 0.5;
+          const amp = 0.18 - tailIndex * 0.02; // tip is more subtle
+          child.rotation.x = child.userData.restRotation.x + Math.sin(t * 1.1 + phase) * amp;
+          child.rotation.y = child.userData.restRotation.y + Math.cos(t * 0.7 + phase) * (amp * 0.5);
+          child.rotation.z = child.userData.restRotation.z + Math.sin(t * 0.9 + phase) * (amp * 0.7);
+          tailIndex++;
+        }
+      });
+    }
   });
 
   // Expression effect: set morph target influence when expression changes
@@ -262,6 +354,7 @@ function App() {
   const typingTimeout = useRef<number | null>(null);
   const [expression, setExpression] = useState<string>('neutral');
   const [lipSyncPhoneme, setLipSyncPhoneme] = useState<string>('');
+  const [isWaving, setIsWaving] = useState<boolean>(false);
   const [, setVoice] = useState<SpeechSynthesisVoice | null>(null);
 
   // On mount, pick the best available voice
@@ -304,6 +397,12 @@ function App() {
     return 'neutral';
   }
 
+  // Check if AI response contains greeting words
+  function shouldWave(text: string): boolean {
+    const t = text.toLowerCase();
+    return /\b(hi|hello|hey|greetings|good morning|good afternoon|good evening)\b/.test(t);
+  }
+
   // Helper: get phoneme from character
   function getPhoneme(char: string): string {
     const c = char.toLowerCase();
@@ -322,8 +421,10 @@ function App() {
   const showTypingEffectSynced = (fullText: string, audio: HTMLAudioElement) => {
     setTyping(true);
     const emotion = detectEmotion(fullText);
+    const shouldWaveNow = shouldWave(fullText);
     setExpression(emotion);
     setLipSyncPhoneme('');
+    setIsWaving(shouldWaveNow);
     let lastPhoneme = '';
     let revealed = 0;
     let rafId: number | null = null;
@@ -371,6 +472,12 @@ function App() {
         rafId = requestAnimationFrame(updateTextByChar);
       } else {
         setTyping(false);
+        // Stop waving after a few seconds
+        if (shouldWaveNow) {
+          setTimeout(() => {
+            setIsWaving(false);
+          }, 3000); // Wave for 3 seconds
+        }
         // Smoothly blend back to neutral
         let blend = 1;
         const fade = () => {
@@ -483,7 +590,7 @@ function App() {
         <ambientLight intensity={1} />
         <directionalLight position={[5, 5, 5]} intensity={1} />
         <Suspense fallback={null}>
-          <RobinModel expression={expression} lipSyncPhoneme={lipSyncPhoneme} object={useGLTF('/robin.glb').scene} />
+          <RobinModel expression={expression} lipSyncPhoneme={lipSyncPhoneme} isWaving={isWaving} object={useGLTF('/robin.glb').scene} />
         </Suspense>
         <OrbitControls enableZoom={true} />
       </Canvas>
