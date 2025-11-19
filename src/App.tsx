@@ -3,9 +3,10 @@ import { OrbitControls, useGLTF } from '@react-three/drei';
 import React, { Suspense, useState, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import type { ComponentProps } from 'react';
+import './App.css';
 
-type RobinModelProps = { expression?: string; isWaving?: boolean } & ComponentProps<'primitive'>;
-const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSyncPhoneme = '', isWaving = false, object, ...props }) => {
+type RobinModelProps = { expression?: string } & ComponentProps<'primitive'>;
+const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSyncPhoneme = '', object, ...props }) => {
   const gltf = useGLTF('/robin.glb')
   const faceMeshesRef = useRef<THREE.Mesh[]>([])
   const blinkIndexRef = useRef<number | null>(null)
@@ -203,7 +204,7 @@ const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSync
       })
     }
 
-    // Human-like, smooth lower arm idle animation or waving
+    // Human-like, smooth lower arm idle animation
     if (gltf.scene) {
       gltf.scene.traverse((child: any) => {
         if (child.isBone && (child.name === 'J_Bip_L_LowerArm' || child.name === 'J_Bip_R_LowerArm')) {
@@ -216,34 +217,21 @@ const RobinModel: React.FC<RobinModelProps> = ({ expression = 'neutral', lipSync
           }
           const t = state.clock.getElapsedTime();
 
-          if (isWaving && child.name === 'J_Bip_R_LowerArm') {
-            // Waving animation - right arm only
-            const waveSpeed = 3.0;
-            const waveAmplitude = 0.8;
-            const waveOffset = Math.sin(t * waveSpeed) * waveAmplitude;
-            const sideToSide = Math.sin(t * waveSpeed * 0.7) * 0.3;
-
-            child.rotation.x = child.userData.restRotation.x + waveOffset;
-            child.rotation.y = child.userData.restRotation.y + sideToSide;
-            child.rotation.z = child.userData.restRotation.z + Math.sin(t * waveSpeed * 0.5) * 0.2;
-          } else {
-            // Normal idle animation
-            const isLeft = child.name === 'J_Bip_L_LowerArm';
-            const basePhase = isLeft ? 0 : Math.PI / 2;
-            // Multi-wave, subtle, organic motion
-            const x =
-              Math.sin(t * 0.45 + basePhase) * 0.18 +
-              Math.sin(t * 0.18 + basePhase * 1.2) * 0.07;
-            const y =
-              Math.sin(t * 0.33 + basePhase * 0.7) * 0.08 +
-              Math.sin(t * 0.13 + basePhase * 1.5) * 0.03;
-            const z =
-              Math.sin(t * 0.38 + basePhase * 1.1) * 0.12 +
-              Math.sin(t * 0.21 + basePhase * 0.9) * 0.04;
-            child.rotation.x = child.userData.restRotation.x + x;
-            child.rotation.y = child.userData.restRotation.y + y;
-            child.rotation.z = child.userData.restRotation.z + z;
-          }
+          const isLeft = child.name === 'J_Bip_L_LowerArm';
+          const basePhase = isLeft ? 0 : Math.PI / 2;
+          // Multi-wave, subtle, organic motion
+          const x =
+            Math.sin(t * 0.45 + basePhase) * 0.18 +
+            Math.sin(t * 0.18 + basePhase * 1.2) * 0.07;
+          const y =
+            Math.sin(t * 0.33 + basePhase * 0.7) * 0.08 +
+            Math.sin(t * 0.13 + basePhase * 1.5) * 0.03;
+          const z =
+            Math.sin(t * 0.38 + basePhase * 1.1) * 0.12 +
+            Math.sin(t * 0.21 + basePhase * 0.9) * 0.04;
+          child.rotation.x = child.userData.restRotation.x + x;
+          child.rotation.y = child.userData.restRotation.y + y;
+          child.rotation.z = child.userData.restRotation.z + z;
         }
       });
     }
@@ -351,41 +339,18 @@ function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [typing, setTyping] = useState(false);
-  const typingTimeout = useRef<number | null>(null);
   const [expression, setExpression] = useState<string>('neutral');
   const [lipSyncPhoneme, setLipSyncPhoneme] = useState<string>('');
-  const [isWaving, setIsWaving] = useState<boolean>(false);
-  const [, setVoice] = useState<SpeechSynthesisVoice | null>(null);
+  const [fakeLipPhoneme, setFakeLipPhoneme] = useState<string>('');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const typingIntervalRef = useRef<number | null>(null);
+  const lipSyncPhonemeRef = useRef<string>('');
+  const activeLipSyncPhoneme = lipSyncPhoneme || fakeLipPhoneme;
 
-  // On mount, pick the best available voice
   useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    function pickBestVoice() {
-      const voices = window.speechSynthesis.getVoices();
-      // Prioritize cute/kind anime-like English female voices
-      const preferred = [
-        // Google voices (Chrome)
-        'en-US-Wavenet-F', 'en-US-Wavenet-C', 'en-US-Wavenet-D',
-        'Google UK English Female', 'Google US English',
-        // Microsoft voices (Edge/Windows)
-        'Microsoft Zira', 'Microsoft Aria', 'Microsoft Jenny',
-        // Apple voices (Safari/Mac)
-        'Samantha', 'Karen', 'Moira',
-        // General
-        'Female', 'en-US', 'en-GB',
-      ];
-      let best: SpeechSynthesisVoice | null = null;
-      for (const name of preferred) {
-        best = voices.find(v => v.name.includes(name) && v.lang.startsWith('en')) || best;
-      }
-      // Fallback: any English voice
-      if (!best) best = voices.find(v => v.lang.startsWith('en')) || null;
-      setVoice(best);
-    }
-    // Some browsers load voices asynchronously
-    window.speechSynthesis.onvoiceschanged = pickBestVoice;
-    pickBestVoice();
-  }, []);
+    lipSyncPhonemeRef.current = lipSyncPhoneme;
+  }, [lipSyncPhoneme]);
 
   // Simple emotion detection based on AI response
   function detectEmotion(text: string): string {
@@ -395,12 +360,6 @@ function App() {
     if (/\b(surprise|wow|amazing|shocked|😲|😮|astonish|incredible|unbelievable)\b/.test(t)) return 'surprised';
     if (/\b(angry|mad|upset|annoy|😠|😡|frustrat|grr)\b/.test(t)) return 'angry';
     return 'neutral';
-  }
-
-  // Check if AI response contains greeting words
-  function shouldWave(text: string): boolean {
-    const t = text.toLowerCase();
-    return /\b(hi|hello|hey|greetings|good morning|good afternoon|good evening)\b/.test(t);
   }
 
   // Helper: get phoneme from character
@@ -414,121 +373,188 @@ function App() {
     return '';
   }
 
-  // Play ElevenLabs TTS audio
-  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const ensureAiPlaceholder = () => {
+    setMessages((msgs) => {
+      const last = msgs[msgs.length - 1];
+      if (!last || last.sender !== 'ai') {
+        return [...msgs, { sender: 'ai', text: '' }];
+      }
+      return msgs;
+    });
+  };
 
-  // Typing animation for AI response, synced to TTS audio
-  const showTypingEffectSynced = (fullText: string, audio: HTMLAudioElement) => {
+  const updateAiMessage = (text: string) => {
+    setMessages((msgs) => {
+      const last = msgs[msgs.length - 1];
+      if (!last || last.sender !== 'ai') {
+        return [...msgs, { sender: 'ai', text }];
+      }
+      const updated = [...msgs];
+      updated[updated.length - 1] = { sender: 'ai', text };
+      return updated;
+    });
+  };
+
+  const finishResponse = (fullText: string, emotion: string) => {
+    setTyping(false);
+    updateAiMessage(fullText);
+    setLipSyncPhoneme('');
+    let blend = 1;
+    const fade = () => {
+      blend -= 0.08;
+      if (blend <= 0) {
+        setExpression('neutral');
+        setLipSyncPhoneme('');
+      } else {
+        setExpression(`${emotion}:${blend}`);
+        setTimeout(fade, 30);
+      }
+    };
+    setTimeout(fade, 300);
+  };
+
+  const revealText = (chars: string[], targetCount: number) => {
+    const count = Math.max(0, Math.min(targetCount, chars.length));
+    const textToShow = chars.slice(0, count).join('');
+    updateAiMessage(textToShow);
+    if (count > 0) {
+      setLipSyncPhoneme(getPhoneme(chars[count - 1]));
+    } else {
+      setLipSyncPhoneme('');
+    }
+  };
+
+  const stopTypingInterval = () => {
+    if (typingIntervalRef.current) {
+      window.clearInterval(typingIntervalRef.current);
+      typingIntervalRef.current = null;
+    }
+  };
+
+  const cleanupAudio = () => {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    if (audioUrlRef.current) {
+      URL.revokeObjectURL(audioUrlRef.current);
+      audioUrlRef.current = null;
+    }
+  };
+
+  useEffect(() => {
+    return () => {
+      stopTypingInterval();
+      cleanupAudio();
+    };
+  }, []);
+
+  // Fake talking fallback so lips move even before TTS arrives
+  useEffect(() => {
+    if (!typing) {
+      setFakeLipPhoneme('');
+      return;
+    }
+    const phonemes = ['A', 'E', 'I', 'O', 'U', 'O', 'A'];
+    let idx = 0;
+    const intervalId = window.setInterval(() => {
+      if (lipSyncPhonemeRef.current) return;
+      setFakeLipPhoneme(phonemes[idx]);
+      idx = (idx + 1) % phonemes.length;
+    }, 110);
+    return () => {
+      window.clearInterval(intervalId);
+      setFakeLipPhoneme('');
+    };
+  }, [typing]);
+
+  const fetchTtsAudio = async (text: string) => {
+    const res = await fetch('http://localhost:3001/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text })
+    });
+    const payload = await res.json().catch(() => null);
+    if (!res.ok || !payload) {
+      const errMessage = payload?.error || 'Failed to generate voice audio';
+      throw new Error(errMessage);
+    }
+    return payload as { audio: string; mimeType?: string };
+  };
+
+  const base64ToBlobUrl = (base64: string, mimeType = 'audio/mpeg') => {
+    const byteCharacters = atob(base64);
+    const byteNumbers = new Array(byteCharacters.length);
+    for (let i = 0; i < byteCharacters.length; i++) {
+      byteNumbers[i] = byteCharacters.charCodeAt(i);
+    }
+    const byteArray = new Uint8Array(byteNumbers);
+    const blob = new Blob([byteArray], { type: mimeType });
+    return URL.createObjectURL(blob);
+  };
+
+  const speakAndAnimate = async (fullText: string) => {
+    const cleanText = fullText || '...';
+    const emotion = detectEmotion(cleanText);
+    ensureAiPlaceholder();
     setTyping(true);
-    const emotion = detectEmotion(fullText);
-    const shouldWaveNow = shouldWave(fullText);
     setExpression(emotion);
     setLipSyncPhoneme('');
-    setIsWaving(shouldWaveNow);
-    let lastPhoneme = '';
+
+    const chars = Array.from(cleanText);
+
     let revealed = 0;
-    let rafId: number | null = null;
-
-    // Character-by-character sync
-    const chars = Array.from(fullText);
-    const totalChars = chars.length;
-
-    function updateTextByChar() {
-      if (!audio.duration || isNaN(audio.duration) || audio.duration === Infinity) {
-        // fallback: reveal all at once if duration is not available
-        setMessages((msgs) => {
-          const last = msgs[msgs.length - 1];
-          if (!last || last.sender !== 'ai') return [...msgs, { sender: 'ai', text: fullText }];
-          const updated = [...msgs];
-          updated[updated.length - 1] = { sender: 'ai', text: fullText };
-          return updated;
-        });
-        setTyping(false);
-        return;
-      }
-      const progress = Math.min(audio.currentTime / audio.duration, 1);
-      const charsToShow = Math.floor(progress * totalChars);
-      if (charsToShow !== revealed) {
-        revealed = charsToShow;
-        const textToShow = chars.slice(0, revealed).join('');
-        setMessages((msgs) => {
-          const last = msgs[msgs.length - 1];
-          if (!last || last.sender !== 'ai') return [...msgs, { sender: 'ai', text: textToShow }];
-          const updated = [...msgs];
-          updated[updated.length - 1] = { sender: 'ai', text: textToShow };
-          return updated;
-        });
-        // Lip sync: update phoneme for the current character
-        let phoneme = '';
-        if (revealed > 0) {
-          phoneme = getPhoneme(chars[revealed - 1]);
-        }
-        if (phoneme !== lastPhoneme) {
-          setLipSyncPhoneme(phoneme);
-          lastPhoneme = phoneme;
-        }
-      }
-      if (progress < 1) {
-        rafId = requestAnimationFrame(updateTextByChar);
-      } else {
-        setTyping(false);
-        // Stop waving after a few seconds
-        if (shouldWaveNow) {
-          setTimeout(() => {
-            setIsWaving(false);
-          }, 3000); // Wave for 3 seconds
-        }
-        // Smoothly blend back to neutral
-        let blend = 1;
-        const fade = () => {
-          blend -= 0.08;
-          if (blend <= 0) {
-            setExpression('neutral');
-            setLipSyncPhoneme('');
-          } else {
-            setExpression(`${emotion}:${blend}`);
-            setLipSyncPhoneme('');
-            setTimeout(fade, 30);
-          }
-        };
-        setTimeout(fade, 300);
-      }
-    }
-
-    // Start updating only when audio actually starts playing
-    const startReveal = () => {
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(updateTextByChar);
+    const safeReveal = (count: number) => {
+      if (count <= revealed) return;
+      revealed = Math.min(count, chars.length);
+      revealText(chars, revealed);
     };
-    audio.addEventListener('play', startReveal);
-    // If audio is already playing (autoplay), start immediately
-    if (!audio.paused) startReveal();
-    // Fallback: if audio doesn't play after 1s, reveal all
-    const fallbackTimeout = setTimeout(() => {
-      if (audio.paused) {
-        setMessages((msgs) => {
-          const last = msgs[msgs.length - 1];
-          if (!last || last.sender !== 'ai') return [...msgs, { sender: 'ai', text: fullText }];
-          const updated = [...msgs];
-          updated[updated.length - 1] = { sender: 'ai', text: fullText };
-          return updated;
-        });
-        setTyping(false);
-      }
-    }, 1500);
-    // Clean up
-    audio.addEventListener('ended', () => {
-      setTyping(false);
-      setMessages((msgs) => {
-        const last = msgs[msgs.length - 1];
-        if (!last || last.sender !== 'ai') return msgs;
-        const updated = [...msgs];
-        updated[updated.length - 1] = { sender: 'ai', text: fullText };
-        return updated;
+    const startTypingLoop = () => {
+      stopTypingInterval();
+      typingIntervalRef.current = window.setInterval(() => {
+        safeReveal(revealed + 1);
+        if (revealed >= chars.length && typingIntervalRef.current) {
+          window.clearInterval(typingIntervalRef.current);
+          typingIntervalRef.current = null;
+        }
+      }, 55);
+    };
+
+    try {
+      const { audio, mimeType } = await fetchTtsAudio(cleanText);
+      cleanupAudio();
+      const audioUrl = base64ToBlobUrl(audio, mimeType);
+      audioUrlRef.current = audioUrl;
+      const audioEl = new Audio(audioUrl);
+      audioRef.current = audioEl;
+
+      audioEl.addEventListener('timeupdate', () => {
+        if (!audioEl.duration || Number.isNaN(audioEl.duration)) return;
+        const progress = audioEl.currentTime / audioEl.duration;
+        const target = Math.ceil(progress * chars.length);
+        safeReveal(target);
       });
-      clearTimeout(fallbackTimeout);
-    });
-    return () => { if (rafId) cancelAnimationFrame(rafId); clearTimeout(fallbackTimeout); };
+
+      audioEl.addEventListener('ended', () => {
+        stopTypingInterval();
+        finishResponse(cleanText, emotion);
+        cleanupAudio();
+      });
+
+      audioEl.addEventListener('error', () => {
+        stopTypingInterval();
+        finishResponse(cleanText, emotion);
+        cleanupAudio();
+      });
+
+      await audioEl.play();
+      startTypingLoop();
+    } catch (err) {
+      console.error('Audio playback failed:', err);
+      startTypingLoop();
+      finishResponse(cleanText, emotion);
+    }
   };
 
   // When AI response is received, start TTS immediately and then animate typing
@@ -546,28 +572,10 @@ function App() {
         body: JSON.stringify({ message: input })
       });
       const data = await res.json();
-      // Start TTS as soon as response is available
-      // Fetch TTS audio and play, then sync text to audio
-      // Stop any previous audio
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
+      if (data.error) {
+        throw new Error(data.error);
       }
-      const ttsRes = await fetch('http://localhost:3001/api/tts', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: data.response })
-      });
-      if (!ttsRes.ok) throw new Error('TTS failed');
-      const blob = await ttsRes.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      // Wait for metadata to load before starting sync and playback
-      audio.addEventListener('loadedmetadata', () => {
-        showTypingEffectSynced(data.response, audio);
-        audio.play();
-      });
+      await speakAndAnimate(data.response);
     } catch (err) {
       setMessages((msgs) => [...msgs, { sender: 'ai', text: 'Error: Could not connect to AI.' }]);
       setTyping(false);
@@ -576,123 +584,74 @@ function App() {
     }
   };
 
-  // Cleanup typing timeout on unmount
-  useEffect(() => {
-    return () => {
-      if (typingTimeout.current) clearTimeout(typingTimeout.current);
-    };
-  }, []);
-
   return (
-    <div style={{ width: '100vw', height: '100vh', margin: 0, padding: 0 }}>
-      <Canvas camera={{ position: [0, 15, 15] }}>
-        <color attach="background" args={["#fff"]} />
-        <ambientLight intensity={1} />
-        <directionalLight position={[5, 5, 5]} intensity={1} />
+    <div className="app-shell">
+      <div className="background-layers">
+        <div className="bg-gradient" />
+        <div className="bg-noise" />
+        <div className="bg-orb orb-one" />
+        <div className="bg-orb orb-two" />
+        <div className="bg-orb orb-three" />
+      </div>
+      <Canvas
+        className="avatar-canvas"
+        camera={{ position: [0, 15, 15] }}
+        style={{ background: 'transparent' }}
+      >
+        <ambientLight intensity={0.9} />
+        <directionalLight position={[5, 5, 5]} intensity={1.2} />
         <Suspense fallback={null}>
-          <RobinModel expression={expression} lipSyncPhoneme={lipSyncPhoneme} isWaving={isWaving} object={useGLTF('/robin.glb').scene} />
+          <RobinModel
+            expression={expression}
+            lipSyncPhoneme={activeLipSyncPhoneme}
+            object={useGLTF('/robin.glb').scene}
+          />
         </Suspense>
         <OrbitControls enableZoom={true} />
       </Canvas>
-      {/* Enhanced Chat UI Overlay */}
-      <div style={{
-        position: 'fixed',
-        left: 0,
-        right: 0,
-        bottom: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        pointerEvents: 'none',
-        zIndex: 1000,
-      }}>
-        <div style={{
-          width: '100%',
-          maxWidth: 600,
-          margin: '0 auto 32px auto',
-          background: 'rgba(255,255,255,0.7)',
-          borderRadius: 18,
-          boxShadow: '0 2px 24px rgba(0,0,0,0.18)',
-          overflow: 'hidden',
-          pointerEvents: 'auto',
-        }}>
-          <div style={{
-            maxHeight: '32vh',
-            overflowY: 'auto',
-            padding: 20,
-            minHeight: 80,
-          }}>
+      <div className="chat-overlay">
+        <div className="chat-card">
+          <div className="chat-card__header">
+            <div>
+              <p className="chat-card__eyebrow">Robin Companion</p>
+              <h2>Let&apos;s talk ✨</h2>
+            </div>
+            <span className={`status-dot ${typing || loading ? 'status-dot--live' : ''}`}>
+              {typing || loading ? 'Live' : 'Idle'}
+            </span>
+          </div>
+          <div className="chat-messages">
             {messages.length === 0 && (
-              <div style={{ color: '#888', fontSize: 15, textAlign: 'center' }}>Say hello to Llama2!</div>
+              <div className="chat-placeholder">Say hello to Robin-chan!</div>
             )}
             {messages.map((msg, i) => (
-              <div key={i} style={{
-                marginBottom: 12,
-                textAlign: msg.sender === 'user' ? 'right' : 'left',
-              }}>
-                <span style={{
-                  display: 'inline-block',
-                  background: msg.sender === 'user' ? 'rgba(79,140,255,0.13)' : 'rgba(255, 214, 221, 0.18)',
-                  color: '#222',
-                  borderRadius: 10,
-                  padding: '8px 16px',
-                  maxWidth: 400,
-                  wordBreak: 'break-word',
-                  fontSize: 16,
-                  boxShadow: msg.sender === 'user' ? '0 1px 4px #4f8cff22' : '0 1px 4px #ffb6c122',
-                  backdropFilter: 'blur(2px)',
-                }}>{msg.text}</span>
+              <div
+                key={i}
+                className={`chat-bubble chat-bubble--${msg.sender}`}
+              >
+                {msg.text}
               </div>
             ))}
-            {(loading || typing) && <div style={{ color: '#aaa', fontSize: 15, textAlign: 'center' }}>Llama2 is thinking...</div>}
+            {(loading || typing) && <div className="chat-placeholder subtle">Robin is thinking...</div>}
           </div>
-          <form onSubmit={sendMessage} style={{
-            display: 'flex',
-            borderTop: '1px solid #e0e0e0',
-            background: 'rgba(255,255,255,0.85)',
-            padding: '0 12px',
-            alignItems: 'center',
-            height: 60,
-          }}>
-            <input
-              type="text"
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              placeholder="Type your message..."
-              style={{
-                flex: 1,
-                border: 'none',
-                outline: 'none',
-                padding: '14px 16px',
-                fontSize: 17,
-                background: 'rgba(255,255,255,0.7)',
-                color: '#222',
-                borderRadius: 10,
-                marginRight: 10,
-                boxShadow: '0 1px 4px #4f8cff11',
-                transition: 'background 0.2s',
-              }}
-              disabled={loading || typing}
-              autoFocus
-            />
+          <form onSubmit={sendMessage} className="chat-form">
+            <div className="chat-input-wrapper">
+              <input
+                type="text"
+                value={input}
+                onChange={e => setInput(e.target.value)}
+                placeholder="Type your message..."
+                disabled={loading || typing}
+                autoFocus
+              />
+              <div className="pulse" aria-hidden />
+            </div>
             <button
               type="submit"
+              className="send-button"
               disabled={loading || typing || !input.trim()}
-              style={{
-                background: '#4f8cff',
-                color: '#fff',
-                border: 'none',
-                borderRadius: 8,
-                padding: '10px 26px',
-                fontSize: 17,
-                cursor: loading || typing || !input.trim() ? 'not-allowed' : 'pointer',
-                boxShadow: '0 1px 4px #4f8cff33',
-                fontWeight: 600,
-                letterSpacing: 0.5,
-                transition: 'background 0.2s',
-              }}
             >
-              Send
+              <span>Send</span>
             </button>
           </form>
         </div>

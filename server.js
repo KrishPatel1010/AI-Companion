@@ -1,7 +1,6 @@
 import express from 'express';
 import cors from 'cors';
 import fetch from 'node-fetch';
-import { Readable } from 'stream';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
@@ -11,16 +10,14 @@ const __dirname = dirname(__filename);
 
 dotenv.config({ path: join(__dirname, '.env') });
 
-// Debug: Check if environment variables are loaded
-console.log('Environment variables loaded:', {
-    ELEVENLABS_API_KEY: process.env.ELEVENLABS_API_KEY ? 'Found' : 'Not found'
-});
-
 const app = express();
 const PORT = 3001;
 
 app.use(cors());
 app.use(express.json());
+
+const DEFAULT_ELEVENLABS_VOICE_ID = 'eVItLK1UvXctxuaRV2Oq';
+const DEFAULT_ELEVENLABS_MODEL_ID = 'eleven_multilingual_v2';
 
 app.post('/api/chat', async (req, res) => {
     const { message } = req.body;
@@ -28,67 +25,113 @@ app.post('/api/chat', async (req, res) => {
         return res.status(400).json({ error: 'Message is required' });
     }
 
-    const systemPrompt = `You are a kind, emotionally supportive anime-style AI companion. Speak gently, use emojis, and encourage positivity.`;
-    const fullPrompt = `${systemPrompt}\nUser: ${message}\nAI:`;
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    if (!apiKey) {
+        console.error('OPENROUTER_API_KEY not set');
+        return res.status(500).json({ error: 'Server misconfiguration: missing OpenRouter API key' });
+    }
+
+    const baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+    const model = process.env.OPENROUTER_MODEL || 'google/gemma-3-27b-it:free';
+    const messages = [
+        {
+            role: 'system',
+            content: 'Act like a cute, supportive girl who listens closely, responds warmly, and encourages the user with gentle positivity.Do not give long answer or not too short. Your name is Robin.'
+        },
+        {
+            role: 'user',
+            content: message
+        }
+    ];
 
     try {
-        const ollamaRes = await fetch('http://localhost:11434/api/generate', {
+        const orRes = await fetch(`${baseUrl}/chat/completions`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+                'HTTP-Referer': process.env.OPENROUTER_REFERER || 'http://localhost:5173',
+                'X-Title': process.env.OPENROUTER_APP_NAME || 'AI Companion'
+            },
             body: JSON.stringify({
-                model: 'llama2',
-                prompt: fullPrompt,
+                model,
+                messages,
                 stream: false
             })
         });
-        const data = await ollamaRes.json();
-        res.json({ response: data.response });
+
+        if (!orRes.ok) {
+            const errText = await orRes.text();
+            console.error('OpenRouter API error:', orRes.status, errText);
+            return res.status(orRes.status).json({ error: 'OpenRouter API error', details: errText });
+        }
+
+        const data = await orRes.json();
+        const content = data?.choices?.[0]?.message?.content ?? '';
+        res.json({ response: content });
     } catch (err) {
-        res.status(500).json({ error: 'Failed to connect to Ollama', details: err.message });
+        console.error('OpenRouter request failed:', err);
+        res.status(500).json({ error: 'Failed to connect to OpenRouter', details: err.message });
     }
 });
 
-// ElevenLabs TTS endpoint
 app.post('/api/tts', async (req, res) => {
     const { text } = req.body;
-    if (!text) return res.status(400).json({ error: 'Text is required' });
-    let apiKey = process.env.ELEVENLABS_API_KEY;
-
-    // Fallback to hardcoded key if env var is not loaded (for testing)
-    if (!apiKey) {
-        console.error('ELEVENLABS_API_KEY not found in environment variables, using fallback');
-        apiKey = 'sk_7089efd7054563edec532c1f4c7eca734ea23d7e9e6d0c72';
+    if (!text || !text.trim()) {
+        return res.status(400).json({ error: 'Text is required for TTS' });
     }
 
-    const voiceId = 'eVItLK1UvXctxuaRV2Oq';
+    const elevenKey = process.env.ELEVENLABS_API_KEY;
+    if (!elevenKey) {
+        console.error('ELEVENLABS_API_KEY not set');
+        return res.status(500).json({ error: 'Server misconfiguration: missing ElevenLabs API key' });
+    }
+
+    const voiceId = process.env.ELEVENLABS_VOICE_ID || DEFAULT_ELEVENLABS_VOICE_ID;
+    const modelId = process.env.ELEVENLABS_MODEL_ID || DEFAULT_ELEVENLABS_MODEL_ID;
+
     try {
-        const ttsRes = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
             method: 'POST',
             headers: {
-                'xi-api-key': apiKey,
                 'Content-Type': 'application/json',
-                'Accept': 'audio/mpeg',
+                'xi-api-key': elevenKey,
+                'Accept': 'audio/mpeg'
             },
             body: JSON.stringify({
                 text,
-                model_id: 'eleven_multilingual_v2',
+                model_id: modelId,
                 voice_settings: {
-                    stability: 0.4,
-                    similarity_boost: 0.8,
-                    style: 0.7,
+                    stability: 0.5,
+                    similarity_boost: 1,
+                    style: 0.5,
                     use_speaker_boost: true,
-                    speed: 1.2
+                    speed: 1.2,
+                    pitch: 0,
+                    volume: 1,
+                    denoise_level: 0,
+                    enhance_level: 0,
+                    enhance_stereo: false,
+                    enhance_surround: false,
+                    enhance_bass: false,
+                    enhance_treble: false,
                 }
             })
         });
-        if (!ttsRes.ok) {
-            const err = await ttsRes.text();
-            console.error('ElevenLabs API error:', ttsRes.status, err);
-            return res.status(500).json({ error: 'TTS failed', details: err });
+
+        if (!ttsResponse.ok) {
+            const errText = await ttsResponse.text();
+            console.error('ElevenLabs API error:', ttsResponse.status, errText);
+            return res.status(ttsResponse.status).json({ error: 'ElevenLabs API error', details: errText });
         }
-        res.setHeader('Content-Type', 'audio/mpeg');
-        ttsRes.body.pipe(res);
+
+        const audioBuffer = await ttsResponse.arrayBuffer();
+        const mimeType = ttsResponse.headers.get('content-type') || 'audio/mpeg';
+        const audioBase64 = Buffer.from(audioBuffer).toString('base64');
+
+        res.json({ audio: audioBase64, mimeType });
     } catch (err) {
+        console.error('ElevenLabs request failed:', err);
         res.status(500).json({ error: 'Failed to connect to ElevenLabs', details: err.message });
     }
 });
